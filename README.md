@@ -3,6 +3,10 @@
 ## Health Check
 ```
     curl -v http://10.201.0.123/
+    curl -v http://10.201.0.123/feed?since=123456 -o /dev/null -s -w 'code=%{http_code} size_download=%{size_download} time_total=%{time_total}\n'
+    curl -v http://10.201.0.123/video/720p/seg-7.ts -o /dev/null -s -w 'code=%{http_code} size_download=%{size_download} time_total=%{time_total}\n'
+    curl -v http://10.201.0.123/video/720p/video-1/playlist.m3u8 -o /dev/null -s -w 'code=%{http_code} size_download=%{size_download} time_total=%{time_total}\n'
+
 ```
 
 ## Config
@@ -17,6 +21,9 @@
             "fixed_count": 75, 
             "mqtt_host": "10.60.0.2", 
             "mqtt_port": 1883
+        },
+        {
+
         }
     ]
 ```
