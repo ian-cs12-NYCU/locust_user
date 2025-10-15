@@ -1,0 +1,7 @@
+
+[
+  { "user_class_name": "SocialUser", "fixed_count": 20 },
+  { "user_class_name": "IoTUser",    "fixed_count": 0,
+    "host": "10.60.0.2", "port": 1883,
+    "min_wait": 0.01, "max_wait": 0.10, "connect_timeout": 5.0 }
+]
