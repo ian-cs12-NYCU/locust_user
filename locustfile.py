@@ -2,6 +2,10 @@ from locust import FastHttpUser, User, task, constant_pacing, constant_throughpu
 from locust.contrib.mqtt import MqttUser, MqttClient
 import random, os
 import paho.mqtt.client as mqtt, os, time, random, json
+import dns.message
+import dns.rdatatype
+import dns.query
+import socket
 
 class SocialUser(FastHttpUser):
     """社群互動用戶：快速、頻繁的請求"""
@@ -59,7 +63,6 @@ class VideoUser(FastHttpUser):
             # 可選：模擬使用者中途跳出（5% 機率提前結束）
             if random.random() < 0.05:
                 break
-
 
 
 # 自定義 MqttClient 以便更好地追蹤和除錯
@@ -173,3 +176,112 @@ class IoTUser(MqttUser):
     def on_stop(self):
         """當用戶停止時顯示統計"""
         print(f"[IoTUser Debug] 📊 Total messages received: {self.received_count}")
+
+
+class DnsLoad(User):
+    """DNS 查詢用戶：隨機發送各種 DNS 查詢"""
+    
+    # DNS 伺服器設定（可以在 config-users.json 中覆寫）
+    dns_server = "1.1.1.1"  # 預設使用 Cloudflare DNS
+    dns_port = 53
+    
+    # 等待時間
+    wait_time = constant_throughput(1)  # 每秒 1 個查詢
+    
+    # 隨機域名列表（可以根據需求調整）
+    domains = [
+        "google.com",
+        "example.com",
+        "github.com",
+        "stackoverflow.com",
+        "youtube.com",
+        "facebook.com",
+        "twitter.com",
+        "amazon.com",
+        "wikipedia.org",
+        "reddit.com",
+        "linkedin.com",
+        "netflix.com",
+        "instagram.com",
+        "apple.com",
+        "microsoft.com",
+    ]
+    
+    # DNS 查詢類型（可以隨機選擇不同的查詢類型）
+    query_types = [
+        (dns.rdatatype.A, "A"),      # IPv4 地址
+        (dns.rdatatype.AAAA, "AAAA"), # IPv6 地址
+        (dns.rdatatype.MX, "MX"),     # 郵件交換記錄
+        (dns.rdatatype.TXT, "TXT"),   # 文本記錄
+        (dns.rdatatype.NS, "NS"),     # 名稱伺服器
+        (dns.rdatatype.CNAME, "CNAME"), # 別名記錄
+    ]
+    
+    def _send_dns_query(self, query_name: str, query_type, query_type_name: str):
+        """發送 DNS 查詢並記錄統計"""
+        start_time = time.time()
+        response_length = 0
+        exception = None
+        
+        try:
+            # 建立 DNS 查詢
+            q = dns.message.make_query(query_name, query_type)
+            
+            # 發送 UDP 查詢
+            response = dns.query.udp(q, self.dns_server, timeout=5, port=self.dns_port)
+            
+            # 計算響應長度
+            response_length = len(response.to_wire())
+            
+            # 計算響應時間（毫秒）
+            response_time = (time.time() - start_time) * 1000
+            
+            # 檢查響應碼
+            if response.rcode() != dns.rcode.NOERROR:
+                exception = Exception(f"DNS query failed with rcode: {dns.rcode.to_text(response.rcode())}")
+            
+        except dns.exception.Timeout as e:
+            response_time = (time.time() - start_time) * 1000
+            exception = e
+        except Exception as e:
+            response_time = (time.time() - start_time) * 1000
+            exception = e
+        
+        # 觸發 Locust 事件以記錄統計
+        self.environment.events.request.fire(
+            request_type="DNS",
+            name=f"DNS:{query_type_name}:{query_name}",
+            response_time=response_time,
+            response_length=response_length,
+            exception=exception,
+            context={}
+        )
+    
+    @task(10)
+    def random_a_query(self):
+        """隨機 A 記錄查詢（最常見的查詢類型）"""
+        domain = random.choice(self.domains)
+        self._send_dns_query(domain, dns.rdatatype.A, "A")
+    
+    @task(5)
+    def random_aaaa_query(self):
+        """隨機 AAAA 記錄查詢（IPv6 地址）"""
+        domain = random.choice(self.domains)
+        self._send_dns_query(domain, dns.rdatatype.AAAA, "AAAA")
+    
+    @task(3)
+    def random_mixed_query(self):
+        """隨機混合類型的查詢"""
+        domain = random.choice(self.domains)
+        qtype, qtype_name = random.choice(self.query_types)
+        self._send_dns_query(domain, qtype, qtype_name)
+    
+    @task(2)
+    def custom_domain_query(self):
+        """對自定義域名進行查詢（可以用來測試特定的 DNS 伺服器）"""
+        # 可以在這裡添加更多的自定義域名或子域名
+        subdomain = random.choice(["www", "mail", "ftp", "api", "cdn", "blog"])
+        domain = random.choice(self.domains)
+        full_domain = f"{subdomain}.{domain}"
+        self._send_dns_query(full_domain, dns.rdatatype.A, "A")
+

@@ -5,5 +5,11 @@
     "host": "10.201.0.123", "port": 1883,
     "min_wait": 0.01, "max_wait": 0.10
   },
-  { "user_class_name": "VideoUser",  "fixed_count": 10 }
+  { "user_class_name": "VideoUser",  "fixed_count": 10 },
+  {
+    "user_class_name": "DnsLoad",
+    "fixed_count": 5,
+    "dns_server": "1.1.1.1",
+    "dns_port": 53
+  }
 ]
