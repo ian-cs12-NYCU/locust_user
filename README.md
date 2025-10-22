@@ -1,4 +1,7 @@
-``` locust --config ./locust.conf ```
+``` 
+    source ./.venv/bin/activate
+    locust --config ./locust.conf 
+```
 
 ## Health Check
 ```
@@ -7,6 +10,12 @@
     curl -v http://10.201.0.123/video/720p/seg-7.ts -o /dev/null -s -w 'code=%{http_code} size_download=%{size_download} time_total=%{time_total}\n'
     curl -v http://10.201.0.123/video/720p/video-1/playlist.m3u8 -o /dev/null -s -w 'code=%{http_code} size_download=%{size_download} time_total=%{time_total}\n'
 
+```
+
+MQTT Check
+```
+    mosquitto_sub -h 10.201.0.123 -p 1883 -t "hello world/reply" -v 
+    mosquitto_pub -h 10.201.0.123 -p 1883 -t "hello world" -v -m "test message from script"
 ```
 
 ## Config
