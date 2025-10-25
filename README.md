@@ -4,6 +4,7 @@
 ```
 
 ## Health Check
+### Web nginx server check
 ```
     curl -v http://10.201.0.123/
     curl -v http://10.201.0.123/feed?since=123456 -o /dev/null -s -w 'code=%{http_code} size_download=%{size_download} time_total=%{time_total}\n'
@@ -12,7 +13,7 @@
 
 ```
 
-MQTT Check
+### MQTT broker Check
 ```
     // In one terminal
     mosquitto_sub -h 10.201.0.123 -p 1883 -t "hello world/reply" -v  
@@ -24,6 +25,11 @@ MQTT Check
 When someone publish to "hello world", the mosquitto_sub terminal shows 
 ```
     hello world/reply {"ok": true, "echo": "hello world", "original_message": "test message from script"}
+```
+
+### DNS server check
+```
+dig @10.201.0.123  google.com A
 ```
 
 ## Config
