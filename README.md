@@ -14,8 +14,16 @@
 
 MQTT Check
 ```
-    mosquitto_sub -h 10.201.0.123 -p 1883 -t "hello world/reply" -v 
-    mosquitto_pub -h 10.201.0.123 -p 1883 -t "hello world" -v -m "test message from script"
+    // In one terminal
+    mosquitto_sub -h 10.201.0.123 -p 1883 -t "hello world/reply" -v  
+
+    // Other Terminal
+    mosquitto_pub -h 10.201.0.123 -p 1883 -t "hello world" -m "test message from script"
+```
+
+When someone publish to "hello world", the mosquitto_sub terminal shows 
+```
+    hello world/reply {"ok": true, "echo": "hello world", "original_message": "test message from script"}
 ```
 
 ## Config
