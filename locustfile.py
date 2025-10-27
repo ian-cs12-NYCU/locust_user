@@ -10,18 +10,58 @@ import socket
 class SocialUser(FastHttpUser):
     """社群互動用戶：快速、頻繁的請求"""
     wait_time = constant_throughput(1)  # 每秒 1 次 task（適合短時間 task）
+
+    # Configuration: 可透過環境變數覆寫
+    # 例如：TARGET_CIDR=10.60.201.0/16 TARGET_SCHEME=http TARGET_PORT=80
+    target_cidr = os.environ.get("TARGET_CIDR", "10.60.201.0/16")
+    target_scheme = os.environ.get("TARGET_SCHEME", "http")
+    # 如果要使用非標準 port，例如 8080，設定 TARGET_PORT
+    target_port = os.environ.get("TARGET_PORT")
+
+    # 準備 ipaddress 網路物件（延遲 import 以避免啟動時錯誤）
+    import ipaddress
+    try:
+        _network = ipaddress.ip_network(target_cidr)
+    except Exception:
+        _network = ipaddress.ip_network("10.60.201.0/16")
+
+    def _random_ip_in_network(self):
+        """Return a random host IP (as string) from the configured CIDR/network.
+
+        Excludes network and broadcast addresses for IPv4 when possible.
+        """
+        # For very large networks, avoid building full list; sample using int arithmetic
+        net = self._network
+        # Get first and last usable IP integers
+        first = int(net.network_address)
+        last = int(net.broadcast_address)
+        # Exclude network and broadcast for IPv4 / >=4 addresses
+        if last - first > 2:
+            first += 1
+            last -= 1
+
+        rand_int = random.randint(first, last)
+        return str(self.ipaddress.ip_address(rand_int))
     
     @task(6)  # 權重：社群
     def feed_scroll(self):
         # 圖片/短片混合
-        self.client.get(f"/feed?since={random.randint(1, 1_000_000_000)}", name="SOCIAL:feed")
+        # 選一個隨機目標 IP，並使用絕對 URL 發送請求
+        target_ip = self._random_ip_in_network()
+        port_part = f":{self.target_port}" if self.target_port else ""
+        base = f"{self.target_scheme}://{target_ip}{port_part}"
+
+        self.client.get(f"{base}/feed?since={random.randint(1, 1_000_000_000)}", name="SOCIAL:feed")
         # 小上傳（評論/按讚）
         if random.random()<0.3:
             self.client.post("/react", json={"pid":random.randint(1, 1_000_000)}, name="SOCIAL:react")
     
     @task(4)  # 其他：瀏覽/搜尋
     def browse(self):
-        self.client.get("/", name="WEB:index")
+        target_ip = self._random_ip_in_network()
+        port_part = f":{self.target_port}" if self.target_port else ""
+        base = f"{self.target_scheme}://{target_ip}{port_part}"
+        self.client.get(f"{base}/", name="WEB:index")
 
 
 class VideoUser(FastHttpUser):
