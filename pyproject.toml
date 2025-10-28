@@ -6,6 +6,11 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "locust>=2.41.6",
-    "paho-mqtt>=2.1.0",
+    "paho-mqtt<2.0.0",
     "dnspython>=2.7.0",
+
+    "locust-plugins<5.0.0"
 ]
+
+[tool.setuptools.packages.find]
+exclude = ["results*", "profiles*"]

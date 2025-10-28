@@ -1,5 +1,6 @@
-from locust import FastHttpUser, User, task, constant_pacing, constant_throughput, constant, events
-from locust.contrib.mqtt import MqttUser, MqttClient
+from locust import HttpUser, User, task, constant_pacing, constant_throughput, constant, events
+from locust_plugins.users.mqtt import MqttUser, MqttClient
+from requests_toolbelt.adapters.source import SourceAddressAdapter
 import random, os
 import paho.mqtt.client as mqtt, os, time, random, json
 import dns.message
@@ -7,9 +8,20 @@ import dns.rdatatype
 import dns.query
 import socket
 
-class SocialUser(FastHttpUser):
-    """社群互動用戶：快速、頻繁的請求"""
+class SocialUser(HttpUser):
+    """社群互動用戶：使用 requests.Session 綁定來源 IP"""
     wait_time = constant_throughput(1)  # 每秒 1 次 task（適合短時間 task）
+    
+    # 設置 source IP
+    source_ip = os.getenv("UE_IP", "10.60.100.1")
+    
+    def on_start(self):
+        """在 on_start 中掛載 SourceAddressAdapter"""
+        print(f"[SocialUser] � Mounting SourceAddressAdapter for IP: {self.source_ip}")
+        adapter = SourceAddressAdapter((self.source_ip, 0))
+        self.client.mount("http://", adapter)
+        self.client.mount("https://", adapter)
+        print(f"[SocialUser] ✅ Adapter mounted. All requests from this user will use {self.source_ip}")
     
     @task(6)  # 權重：社群
     def feed_scroll(self):
@@ -24,7 +36,7 @@ class SocialUser(FastHttpUser):
         self.client.get("/", name="WEB:index")
 
 
-class VideoUser(FastHttpUser):
+class VideoUser(HttpUser):
     """影音串流用戶：長時間連續 session"""
     # 不設 wait_time，讓 session 內部的 sleep 自然控制節奏
     # 或用很長的間隔，例如：wait_time = constant(300)  # 每次 session 結束後等 5 分鐘
@@ -284,4 +296,3 @@ class DnsLoad(User):
         domain = random.choice(self.domains)
         full_domain = f"{subdomain}.{domain}"
         self._send_dns_query(full_domain, dns.rdatatype.A, "A")
-

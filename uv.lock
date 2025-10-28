@@ -467,6 +467,11 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/f0/1e/6afe7d0c3d8fc5fff3d82d77eb141d5440bc776bddc7a9802fa79c7873e0/locust-2.41.6-py3-none-any.whl", hash = "sha256:6679bf9e2d92e3c6500551f29dfa58a84d6f767d398cedefbc8a4765659a2126", size = 1434094, upload-time = "2025-10-10T12:35:48.355Z" },
 ]
 
+[package.optional-dependencies]
+mqtt = [
+    { name = "paho-mqtt" },
+]
+
 [[package]]
 name = "locust-cloud"
 version = "1.27.5"
@@ -489,14 +494,14 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "dnspython" },
-    { name = "locust" },
+    { name = "locust", extra = ["mqtt"] },
     { name = "paho-mqtt" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "dnspython", specifier = ">=2.7.0" },
-    { name = "locust", specifier = ">=2.41.6" },
+    { name = "locust", extras = ["mqtt"], specifier = ">=2.41.6" },
     { name = "paho-mqtt", specifier = ">=2.1.0" },
 ]
 

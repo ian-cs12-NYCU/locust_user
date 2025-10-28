@@ -52,3 +52,10 @@ When someone publish to "hello world", the mosquitto_sub terminal shows
 用 weight：把目標類的 "weight": 大數值，其餘小數值；同總人數下它會被優先補滿。
 
 互動調整（非 headless）：啟動加 --class-picker，在 UI 直接選 class 與人數/權重。
+
+## Install
+
+```
+uv pip install -e .
+
+```

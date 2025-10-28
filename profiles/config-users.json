@@ -1,14 +1,23 @@
 
 [
-  { "user_class_name": "SocialUser", "fixed_count": 20 },
-  { "user_class_name": "IoTUser",    "fixed_count": 5,
+  { 
+    "user_class_name": "SocialUser", 
+    "weight": 1,
+    "host": "http://httpbin.org"
+  },
+  { 
+    "user_class_name": "IoTUser",    
+    "weight": 0,
     "host": "10.201.0.123", "port": 1883,
     "min_wait": 0.01, "max_wait": 0.10
   },
-  { "user_class_name": "VideoUser",  "fixed_count": 10 },
+  { 
+    "user_class_name": "VideoUser",  
+    "weight": 0
+  },
   {
     "user_class_name": "DnsLoad",
-    "fixed_count": 5,
+    "weight": 0,
     "dns_server": "1.1.1.1",
     "dns_port": 53
   }
