@@ -25,24 +25,10 @@ When someone publish to "hello world", the mosquitto_sub terminal shows
 ```
     hello world/reply {"ok": true, "echo": "hello world", "original_message": "test message from script"}
 ```
+### DNS user
 
-## Config
-``` 
-    [
-        {
-            "user_class_name": "SocialUser", 
-            "weight": 3
-        },
-        {
-            "user_class_name": "MqttUser", 
-            "fixed_count": 75, 
-            "mqtt_host": "10.60.0.2", 
-            "mqtt_port": 1883
-        },
-        {
-
-        }
-    ]
+```
+    dig @10.201.0.123 twitter.com A
 ```
 
 ### 快速切換要加速的 user 類型（三種方式）

@@ -7,12 +7,12 @@
   },
   { 
     "user_class_name": "VideoUser",  
-    "weight": 0
+    "weight": 1
   },
   {
     "user_class_name": "DnsLoad",
-    "weight": 0,
-    "dns_server": "1.1.1.1",
+    "weight": 1,
+    "dns_server": "10.201.0.180",
     "dns_port": 53
   }
 ]

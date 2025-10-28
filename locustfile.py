@@ -1,6 +1,6 @@
 from locust import HttpUser, User, task, constant_pacing, constant_throughput, constant, events
 from requests_toolbelt.adapters.source import SourceAddressAdapter
-import random, os
+import random, os, time
 import dns.message
 import dns.rdatatype
 import dns.query
