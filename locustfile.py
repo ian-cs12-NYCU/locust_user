@@ -4,17 +4,20 @@ import random, os, time
 import dns.message
 import dns.rdatatype
 import dns.query
+from utils.ip_manager import get_source_ip  # 從 utils 模組導入
 
 class SocialUser(HttpUser):
     """社群互動用戶：使用 requests.Session 綁定來源 IP"""
     wait_time = constant_throughput(1)  # 每秒 1 次 task（適合短時間 task）
     
-    # 設置 source IP
-    source_ip = os.getenv("UE_IP", "10.60.100.1")
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # 每個 User 實例在創建時，傳入自己的類名來獲取 IP
+        self.source_ip = get_source_ip(self.__class__.__name__)
     
     def on_start(self):
         """在 on_start 中掛載 SourceAddressAdapter"""
-        print(f"[SocialUser] � Mounting SourceAddressAdapter for IP: {self.source_ip}")
+        print(f"[SocialUser] 🔧 Mounting SourceAddressAdapter for IP: {self.source_ip}")
         adapter = SourceAddressAdapter((self.source_ip, 0))
         self.client.mount("http://", adapter)
         self.client.mount("https://", adapter)
@@ -35,6 +38,20 @@ class SocialUser(HttpUser):
 
 class VideoUser(HttpUser):
     """影音串流用戶：長時間連續 session"""
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # 傳入自己的類名來獲取 IP
+        self.source_ip = get_source_ip(self.__class__.__name__)
+
+    def on_start(self):
+        """在 on_start 中掛載 SourceAddressAdapter"""
+        print(f"[VideoUser] 🔧 Mounting SourceAddressAdapter for IP: {self.source_ip}")
+        adapter = SourceAddressAdapter((self.source_ip, 0))
+        self.client.mount("http://", adapter)
+        self.client.mount("https://", adapter)
+        print(f"[VideoUser] ✅ Adapter mounted. All requests from this user will use {self.source_ip}")
+        
     # 不設 wait_time，讓 session 內部的 sleep 自然控制節奏
     # 或用很長的間隔，例如：wait_time = constant(300)  # 每次 session 結束後等 5 分鐘
     
@@ -77,6 +94,12 @@ class VideoUser(HttpUser):
 class DnsLoad(User):
     """DNS 查詢用戶：隨機發送各種 DNS 查詢"""
     
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # 傳入自己的類名來獲取 IP
+        self.source_ip = get_source_ip(self.__class__.__name__)
+        print(f"[DnsLoad] Initialized with source IP: {self.source_ip}")
+
     # DNS 伺服器設定（可以在 config-users.json 中覆寫）
     dns_server = "1.1.1.1"  # 預設使用 Cloudflare DNS
     dns_port = 53
@@ -123,8 +146,8 @@ class DnsLoad(User):
             # 建立 DNS 查詢
             q = dns.message.make_query(query_name, query_type)
             
-            # 發送 UDP 查詢
-            response = dns.query.udp(q, self.dns_server, timeout=5, port=self.dns_port)
+            # 發送 UDP 查詢，並綁定來源 IP
+            response = dns.query.udp(q, self.dns_server, timeout=5, port=self.dns_port, source=self.source_ip)
             
             # 計算響應長度
             response_length = len(response.to_wire())
