@@ -48,16 +48,29 @@ locust --config ./locust.conf
     {
       "subnet": "10.201.0.0/28",
       "description": "Social服務子網段",
-      "weight": 3
+      "weight": 3,
+      "user_types": ["SocialUser"]
     },
     {
       "subnet": "10.201.0.128/28",
       "description": "Video服務子網段",
-      "weight": 2
+      "weight": 2,
+      "user_types": ["VideoUser"]
+    },
+    {
+      "subnet": "10.201.0.144/28",
+      "description": "通用服務子網段",
+      "weight": 1,
+      "user_types": ["SocialUser", "VideoUser", "DnsLoad"]
     }
   ]
 }
 ```
+
+**欄位說明**：
+- `subnet`: 子網段（CIDR 格式）
+- `weight`: 配重（數值越大，被選中機率越高）
+- `user_types`: 允許使用此子網段的 User 類型列表（空陣列表示所有類型都可用）
 
 ### profiles/ips.json
 定義來源 IP 地址池：
@@ -76,11 +89,18 @@ locust --config ./locust.conf
 ### Target Server 動態分配
 - 每種 User 可配置目標伺服器數量 (`target_server_count`)
 - 支援基於配重的隨機分配（`weight` 越大，被選中機率越高）
+- **子網段專屬分配**：透過 `user_types` 指定哪些 User 可以使用特定子網段
+  - 例如：VideoUser 只會從 Video 子網段中選擇目標伺服器
+  - 通用子網段可設定多個 User 類型共用
 - 每個 User 實例在執行時從分配到的伺服器列表中隨機選擇目標
 
-### 測試配置
+### 測試
 ```bash
-python test_target_server.py
+# 執行所有單元測試
+python3 -m unittest utils/test_target_server.py -v
+
+# 或使用 pytest (如果已安裝)
+pytest utils/test_target_server.py -v
 ```
 
 ## Health Check## Health Check

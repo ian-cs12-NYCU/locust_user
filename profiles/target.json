@@ -3,22 +3,26 @@
     {
       "subnet": "10.201.0.0/28",
       "description": "Social服務子網段 (10.201.0.1-10.201.0.14)",
-      "weight": 3
+      "weight": 3,
+      "user_types": ["SocialUser"]
     },
     {
       "subnet": "10.201.0.16/28",
       "description": "Social服務子網段 (10.201.0.17-10.201.0.30)",
-      "weight": 3
+      "weight": 3,
+      "user_types": ["SocialUser"]
     },
     {
       "subnet": "10.201.0.128/28",
       "description": "Video服務子網段 (10.201.0.129-10.201.0.142)",
-      "weight": 2
+      "weight": 2,
+      "user_types": ["VideoUser"]
     },
     {
       "subnet": "10.201.0.144/28",
       "description": "通用服務子網段 (10.201.0.145-10.201.0.158)",
-      "weight": 1
+      "weight": 1,
+      "user_types": ["SocialUser", "VideoUser", "DnsLoad"]
     }
   ]
 }

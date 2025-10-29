@@ -85,14 +85,21 @@ class TargetServerManager:
             try:
                 subnet = ipaddress.ip_network(subnet_config['subnet'], strict=False)
                 weight = subnet_config['weight']
+                user_types = subnet_config.get('user_types', [])  # 獲取允許的 User 類型列表
                 
                 # 獲取子網中所有可用的主機 IP（排除網路地址和廣播地址）
                 # 對於 /28 子網，這會給出 14 個可用 IP
                 for ip in subnet.hosts():
-                    self.ip_pools.append((str(ip), weight))
+                    self.ip_pools.append({
+                        'ip': str(ip),
+                        'weight': weight,
+                        'user_types': user_types  # 記錄此 IP 允許分配給哪些 User 類型
+                    })
                 
+                user_types_str = ', '.join(user_types) if user_types else '所有類型'
                 print(f"[TargetServerManager] Loaded subnet {subnet_config['subnet']} "
-                      f"with weight {weight}, {subnet.num_addresses - 2} hosts")
+                      f"with weight {weight}, {subnet.num_addresses - 2} hosts, "
+                      f"for user types: {user_types_str}")
                       
             except (ValueError, KeyError) as e:
                 print(f"[TargetServerManager] Error processing subnet {subnet_config.get('subnet', 'unknown')}: {e}")
@@ -117,13 +124,25 @@ class TargetServerManager:
             return []
         
         with self._allocation_lock:
+            # 過濾出允許此 User 類型使用的 IP
+            available_ips = []
+            for ip_info in self.ip_pools:
+                user_types = ip_info['user_types']
+                # 如果 user_types 為空，表示可用於所有類型；否則檢查是否在允許列表中
+                if not user_types or user_class_name in user_types:
+                    available_ips.append(ip_info)
+            
+            if not available_ips:
+                print(f"[TargetServerManager] Warning: No IPs available for user type {user_class_name}")
+                return []
+            
             # 使用加權隨機選擇
             # 如果請求的數量超過可用 IP 數量，則允許重複
             selected_ips = []
             
             # 準備加權選擇的數據
-            ips = [ip for ip, _ in self.ip_pools]
-            weights = [weight for _, weight in self.ip_pools]
+            ips = [ip_info['ip'] for ip_info in available_ips]
+            weights = [ip_info['weight'] for ip_info in available_ips]
             
             # 如果請求數量小於等於可用 IP 數量，嘗試不重複選擇
             if count <= len(ips):
@@ -161,8 +180,20 @@ class TargetServerManager:
             return ""
         
         with self._allocation_lock:
-            ips = [ip for ip, _ in self.ip_pools]
-            weights = [weight for _, weight in self.ip_pools]
+            # 過濾出允許此 User 類型使用的 IP
+            available_ips = []
+            for ip_info in self.ip_pools:
+                user_types = ip_info['user_types']
+                # 如果 user_types 為空，表示可用於所有類型；否則檢查是否在允許列表中
+                if not user_types or user_class_name in user_types:
+                    available_ips.append(ip_info)
+            
+            if not available_ips:
+                print(f"[TargetServerManager] Warning: No IPs available for user type {user_class_name}")
+                return ""
+            
+            ips = [ip_info['ip'] for ip_info in available_ips]
+            weights = [ip_info['weight'] for ip_info in available_ips]
             selected_ip = random.choices(ips, weights=weights, k=1)[0]
             
             return selected_ip
