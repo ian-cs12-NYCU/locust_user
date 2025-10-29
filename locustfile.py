@@ -1,10 +1,31 @@
 from locust import HttpUser, User, task, constant_pacing, constant_throughput, constant, events
 from requests_toolbelt.adapters.source import SourceAddressAdapter
-import random, os, time
+import random, os, time, json
 import dns.message
 import dns.rdatatype
 import dns.query
+from pathlib import Path
 from utils.ip_manager import get_source_ip  # 從 utils 模組導入
+from utils.target_server import get_target_servers  # 導入目標伺服器管理器
+
+def _load_user_config():
+    """載入 config-users.json 配置檔案"""
+    base_dir = Path(__file__).parent
+    config_file = base_dir / 'profiles' / 'config-users.json'
+    try:
+        with open(config_file, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"[Config] Error loading config-users.json: {e}")
+        return []
+
+def _get_target_count_for_user(user_class_name: str) -> int:
+    """從配置中獲取特定 User 類型的 target_server_count"""
+    config = _load_user_config()
+    for user_config in config:
+        if user_config.get('user_class_name') == user_class_name:
+            return user_config.get('target_server_count', 0)
+    return 0
 
 class SocialUser(HttpUser):
     """社群互動用戶：使用 requests.Session 綁定來源 IP"""
@@ -14,6 +35,12 @@ class SocialUser(HttpUser):
         super().__init__(*args, **kwargs)
         # 每個 User 實例在創建時，傳入自己的類名來獲取 IP
         self.source_ip = get_source_ip(self.__class__.__name__)
+        
+        # 獲取目標伺服器列表
+        target_count = _get_target_count_for_user(self.__class__.__name__)
+        self.target_servers = get_target_servers(self.__class__.__name__, target_count)
+        print(f"[SocialUser] Initialized with source IP: {self.source_ip}, "
+              f"target servers: {self.target_servers}")
     
     def on_start(self):
         """在 on_start 中掛載 SourceAddressAdapter"""
@@ -23,17 +50,25 @@ class SocialUser(HttpUser):
         self.client.mount("https://", adapter)
         print(f"[SocialUser] ✅ Adapter mounted. All requests from this user will use {self.source_ip}")
     
+    def _get_target_host(self):
+        """從目標伺服器列表中隨機選擇一個"""
+        if self.target_servers:
+            return f"http://{random.choice(self.target_servers)}"
+        return self.host  # 如果沒有配置目標伺服器，使用預設 host
+    
     @task(6)  # 權重：社群
     def feed_scroll(self):
         # 圖片/短片混合
-        self.client.get(f"/feed?since={random.randint(1, 1_000_000_000)}", name="SOCIAL:feed")
+        target_host = self._get_target_host()
+        self.client.get(f"{target_host}/feed?since={random.randint(1, 1_000_000_000)}", name="SOCIAL:feed")
         # 小上傳（評論/按讚）
         if random.random()<0.3:
-            self.client.post("/react", json={"pid":random.randint(1, 1_000_000)}, name="SOCIAL:react")
+            self.client.post(f"{target_host}/react", json={"pid":random.randint(1, 1_000_000)}, name="SOCIAL:react")
     
     @task(4)  # 其他：瀏覽/搜尋
     def browse(self):
-        self.client.get("/", name="WEB:index")
+        target_host = self._get_target_host()
+        self.client.get(f"{target_host}/", name="WEB:index")
 
 
 class VideoUser(HttpUser):
@@ -43,6 +78,12 @@ class VideoUser(HttpUser):
         super().__init__(*args, **kwargs)
         # 傳入自己的類名來獲取 IP
         self.source_ip = get_source_ip(self.__class__.__name__)
+        
+        # 獲取目標伺服器列表
+        target_count = _get_target_count_for_user(self.__class__.__name__)
+        self.target_servers = get_target_servers(self.__class__.__name__, target_count)
+        print(f"[VideoUser] Initialized with source IP: {self.source_ip}, "
+              f"target servers: {self.target_servers}")
 
     def on_start(self):
         """在 on_start 中掛載 SourceAddressAdapter"""
@@ -51,15 +92,23 @@ class VideoUser(HttpUser):
         self.client.mount("http://", adapter)
         self.client.mount("https://", adapter)
         print(f"[VideoUser] ✅ Adapter mounted. All requests from this user will use {self.source_ip}")
+    
+    def _get_target_host(self):
+        """從目標伺服器列表中隨機選擇一個"""
+        if self.target_servers:
+            return f"http://{random.choice(self.target_servers)}"
+        return self.host  # 如果沒有配置目標伺服器，使用預設 host
         
     # 不設 wait_time，讓 session 內部的 sleep 自然控制節奏
     # 或用很長的間隔，例如：wait_time = constant(300)  # 每次 session 結束後等 5 分鐘
     
     @task
     def video_watch_session(self):
+        target_host = self._get_target_host()
+        
         # 1. 抓 playlist（模擬播放器初始化）
         video_id = random.randint(1, 10000)
-        self.client.get(f"/video/720p/video-{video_id}/playlist.m3u8", name="VIDEO:playlist")
+        self.client.get(f"{target_host}/video/720p/video-{video_id}/playlist.m3u8", name="VIDEO:playlist")
         
         # 2. 決定這次 session 要看幾段（模擬短/中/長影片或中途離開）
         # 假設每段 3 秒，60 段 = 3 分鐘，300 段 = 15 分鐘
@@ -72,7 +121,7 @@ class VideoUser(HttpUser):
         for i in range(watch_segments):
             # 抓取當前 segment
             with self.client.get(
-                f"/video/720p/seg-{seg}.ts", 
+                f"{target_host}/video/720p/seg-{seg}.ts", 
                 name="VIDEO:hls_seg",
                 catch_response=True
             ) as resp:
@@ -98,11 +147,22 @@ class DnsLoad(User):
         super().__init__(*args, **kwargs)
         # 傳入自己的類名來獲取 IP
         self.source_ip = get_source_ip(self.__class__.__name__)
-        print(f"[DnsLoad] Initialized with source IP: {self.source_ip}")
+        
+        # 獲取目標伺服器列表（DNS 伺服器）
+        target_count = _get_target_count_for_user(self.__class__.__name__)
+        self.target_servers = get_target_servers(self.__class__.__name__, target_count)
+        print(f"[DnsLoad] Initialized with source IP: {self.source_ip}, "
+              f"target DNS servers: {self.target_servers}")
 
     # DNS 伺服器設定（可以在 config-users.json 中覆寫）
     dns_server = "1.1.1.1"  # 預設使用 Cloudflare DNS
     dns_port = 53
+    
+    def _get_target_dns_server(self):
+        """從目標伺服器列表中隨機選擇一個 DNS 伺服器"""
+        if self.target_servers:
+            return random.choice(self.target_servers)
+        return self.dns_server  # 如果沒有配置目標伺服器，使用預設 DNS 伺服器
     
     # 等待時間
     wait_time = constant_throughput(1)  # 每秒 1 個查詢
@@ -138,6 +198,9 @@ class DnsLoad(User):
     
     def _send_dns_query(self, query_name: str, query_type, query_type_name: str):
         """發送 DNS 查詢並記錄統計"""
+        # 動態選擇目標 DNS 伺服器
+        target_dns = self._get_target_dns_server()
+        
         start_time = time.time()
         response_length = 0
         exception = None
@@ -146,8 +209,8 @@ class DnsLoad(User):
             # 建立 DNS 查詢
             q = dns.message.make_query(query_name, query_type)
             
-            # 發送 UDP 查詢，並綁定來源 IP
-            response = dns.query.udp(q, self.dns_server, timeout=5, port=self.dns_port, source=self.source_ip)
+            # 發送 UDP 查詢，並綁定來源 IP，使用動態選擇的目標 DNS 伺服器
+            response = dns.query.udp(q, target_dns, timeout=5, port=self.dns_port, source=self.source_ip)
             
             # 計算響應長度
             response_length = len(response.to_wire())
@@ -169,7 +232,7 @@ class DnsLoad(User):
         # 觸發 Locust 事件以記錄統計
         self.environment.events.request.fire(
             request_type="DNS",
-            name=f"DNS:{query_type_name}:{query_name}",
+            name=f"DNS:{query_type_name}:{query_name}@{target_dns}",
             response_time=response_time,
             response_length=response_length,
             exception=exception,
