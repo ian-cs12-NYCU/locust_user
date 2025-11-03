@@ -4,18 +4,18 @@
     "user_class_name": "SocialUser", 
     "weight": 1,
     "host": "http://httpbin.org",
-    "target_server_count": 2
+    "target_server_count": 50
   },
   { 
     "user_class_name": "VideoUser",  
     "weight": 1,
-    "target_server_count": 1
+    "target_server_count": 5
   },
   {
     "user_class_name": "DnsLoad",
     "weight": 1,
     "dns_server": "10.201.0.180",
     "dns_port": 53,
-    "target_server_count": 3
+    "target_server_count": 1
   }
 ]
