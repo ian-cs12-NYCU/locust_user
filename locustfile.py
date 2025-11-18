@@ -248,15 +248,37 @@ class DnsLoad(User):
         print(f"[DnsLoad] Initialized with source IP: {self.source_ip}, "
               f"target DNS servers: {self.target_servers}")
 
+        # If the user config contains an explicit dns_server for DnsLoad, prefer that
+        try:
+            cfg = _load_user_config()
+            for item in cfg:
+                if item.get('user_class_name') == self.__class__.__name__:
+                    # override defaults if present
+                    if item.get('dns_server'):
+                        self.dns_server = item.get('dns_server')
+                    if item.get('dns_port'):
+                        self.dns_port = item.get('dns_port')
+                    break
+        except Exception:
+            # keep defaults if config can't be read
+            pass
+
     # DNS 伺服器設定（可以在 config-users.json 中覆寫）
     dns_server = "1.1.1.1"  # 預設使用 Cloudflare DNS
     dns_port = 53
     
     def _get_target_dns_server(self):
         """從目標伺服器列表中隨機選擇一個 DNS 伺服器"""
+        # Prefer an explicit configured DNS server (from config-users.json or default attribute).
+        if getattr(self, 'dns_server', None):
+            return self.dns_server
+
+        # Fallback: if a pool of target_servers was explicitly provided and intended to be DNS servers,
+        # choose one at random. Otherwise fall back to the dns_server attribute.
         if self.target_servers:
             return random.choice(self.target_servers)
-        return self.dns_server  # 如果沒有配置目標伺服器，使用預設 DNS 伺服器
+
+        return self.dns_server
     
     # 等待時間
     wait_time = constant_throughput(1)  # 每秒 1 個查詢
@@ -281,13 +303,9 @@ class DnsLoad(User):
     ]
     
     # DNS 查詢類型（可以隨機選擇不同的查詢類型）
+    # Restrict queries to A records only for this environment — user requested A-only testing
     query_types = [
-        (dns.rdatatype.A, "A"),      # IPv4 地址
-        (dns.rdatatype.AAAA, "AAAA"), # IPv6 地址
-        (dns.rdatatype.MX, "MX"),     # 郵件交換記錄
-        (dns.rdatatype.TXT, "TXT"),   # 文本記錄
-        (dns.rdatatype.NS, "NS"),     # 名稱伺服器
-        (dns.rdatatype.CNAME, "CNAME"), # 別名記錄
+        (dns.rdatatype.A, "A"),      # IPv4 address only
     ]
     
     def _send_dns_query(self, query_name: str, query_type, query_type_name: str):
@@ -339,18 +357,6 @@ class DnsLoad(User):
         domain = random.choice(self.domains)
         self._send_dns_query(domain, dns.rdatatype.A, "A")
     
-    @task(5)
-    def random_aaaa_query(self):
-        """隨機 AAAA 記錄查詢（IPv6 地址）"""
-        domain = random.choice(self.domains)
-        self._send_dns_query(domain, dns.rdatatype.AAAA, "AAAA")
-    
-    @task(3)
-    def random_mixed_query(self):
-        """隨機混合類型的查詢"""
-        domain = random.choice(self.domains)
-        qtype, qtype_name = random.choice(self.query_types)
-        self._send_dns_query(domain, qtype, qtype_name)
     
     @task(2)
     def custom_domain_query(self):
@@ -359,4 +365,5 @@ class DnsLoad(User):
         subdomain = random.choice(["www", "mail", "ftp", "api", "cdn", "blog"])
         domain = random.choice(self.domains)
         full_domain = f"{subdomain}.{domain}"
+        # Ensure only A queries are sent
         self._send_dns_query(full_domain, dns.rdatatype.A, "A")

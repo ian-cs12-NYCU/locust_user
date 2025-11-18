@@ -28,6 +28,7 @@ SEG_BASE_PATH="/video/720p"
 
 echo "============================================================"
 echo "Locust quick test (English)"
+echo "NOTE: This quick test performs DNS A-record checks ONLY. (不會測試 AAAA 或 MX)"
 echo "============================================================"
 echo
 
@@ -128,6 +129,102 @@ for i in $(seq 1 10); do
         printf "  ❌ Sample %2d: video-%3d -> HTTP %s\n" "$i" "$rand" "$code"
     fi
 done
+
+echo
+echo "============================================================"
+echo "6) DNS checks for domains used by locust"
+
+# determine dns server from profiles/config-users.json if present (DnsLoad entry)
+DNS_SERVER="1.1.1.1"
+if [ -f "profiles/config-users.json" ]; then
+    ln=$(grep -n '"user_class_name"[[:space:]]*:[[:space:]]*"DnsLoad"' -n profiles/config-users.json | cut -d: -f1 | head -n1 || true)
+    if [ -n "$ln" ]; then
+        dns_line=$(sed -n "$ln,$((ln+10))p" profiles/config-users.json | grep '"dns_server"' | head -n1 || true)
+        if [ -n "$dns_line" ]; then
+            DNS_SERVER=$(echo "$dns_line" | sed -E 's/.*"dns_server"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+        fi
+    fi
+fi
+
+# determine a small sample of IPs in 10.201.0.0/16 to check (prefer configured host if 10.201.*)
+echo "DNS server to test: ${DNS_SERVER}"
+
+# Build a small sample of IPs using the project's TargetServerManager to better mirror Locust allocation.
+# We call a small Python snippet that imports the project's helper and requests a few target servers for VideoUser.
+# Any informational prints from the manager are silenced when importing to keep output clean.
+sample_ips=()
+py_out=$(python3 - <<'PY'
+import os, sys
+from contextlib import redirect_stdout
+with open(os.devnull, 'w') as devnull:
+    with redirect_stdout(devnull):
+        from utils.target_server import get_target_servers
+        ips = get_target_servers('VideoUser', 4)
+        # print the IPs (silenced prints during manager init are redirected)
+        print(' '.join(ips))
+PY
+)
+if [ -n "$py_out" ]; then
+    # split into bash array
+    read -r -a sample_ips <<< "$py_out"
+fi
+# Fallback: if python did not return usable IPs, use a few deterministic samples
+if [ ${#sample_ips[@]} -eq 0 ]; then
+    sample_prefix="10.201"
+    sample_ips+=("${sample_prefix}.0.1" "${sample_prefix}.0.50" "${sample_prefix}.0.200")
+fi
+
+echo
+echo "Sample IP reachability checks (few addresses in 10.201.0.0/16): ${sample_ips[*]}"
+for sip in "${sample_ips[@]}"; do
+    # check HTTP root on the IP
+    code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 "http://${sip}/" || echo "000")
+    if [ "$code" = "200" ]; then
+        printf "  ✅ %-15s -> HTTP %s\n" "$sip" "$code"
+    elif [ "$code" = "000" ]; then
+        printf "  ❌ %-15s -> unreachable or timeout\n" "$sip"
+    else
+        printf "  ⚠️  %-15s -> HTTP %s\n" "$sip" "$code"
+    fi
+done
+
+# extract domains list from locustfile.py
+domains=()
+mapfile -t raw_domains < <(awk '/domains = \[/{flag=1;next}/\]/{flag=0}flag{print}' locustfile.py || true)
+for d in "${raw_domains[@]}"; do
+    dom=$(echo "$d" | sed -E 's/[^\"]*"([^"]+)".*$/\1/')
+    if [ -n "$dom" ]; then
+        domains+=("$dom")
+    fi
+done
+
+if [ ${#domains[@]} -eq 0 ]; then
+    echo "No domains found in locustfile.py to test."
+else
+    echo "Testing DNS for domains used in locustfile.py: ${domains[*]}"
+    types=(A)
+    for domain in "${domains[@]}"; do
+        echo
+        printf "Domain: %s\n" "$domain"
+        for t in "${types[@]}"; do
+            if command -v dig >/dev/null 2>&1; then
+                out=$(dig +short @${DNS_SERVER} ${domain} ${t} 2>/dev/null | tr -s '\n' ' ')
+            else
+                # fallback to nslookup for A/MX; nslookup doesn't support AAAA query type flag uniformly
+                if [ "$t" = "A" ] || [ "$t" = "MX" ]; then
+                    out=$(nslookup -type=${t} ${domain} ${DNS_SERVER} 2>/dev/null | awk '/^\s*[^#].*\bAddress:/{print $2}' | tr -s '\n' ' ')
+                else
+                    out="(no tool to query ${t})"
+                fi
+            fi
+            if [ -n "$out" ]; then
+                printf "  ✅ %-4s -> %s\n" "$t" "$out"
+            else
+                printf "  ❌ %-4s -> no answer\n" "$t"
+            fi
+        done
+    done
+fi
 
 echo
 echo "============================================================"
