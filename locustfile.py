@@ -1,12 +1,16 @@
-from locust import HttpUser, User, task, constant_pacing, constant_throughput, constant, events
+from locust import HttpUser, User, task, constant_throughput
 from requests_toolbelt.adapters.source import SourceAddressAdapter
-import random, os, time, json
+import random, os, time, json, logging
 import dns.message
 import dns.rdatatype
 import dns.query
 from pathlib import Path
 from utils.ip_manager import get_source_ip  # 從 utils 模組導入
 from utils.target_server import get_target_servers  # 導入目標伺服器管理器
+
+# 設定日誌格式，方便除錯
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 def _load_user_config():
     """載入 config-users.json 配置檔案"""
@@ -51,24 +55,36 @@ class SocialUser(HttpUser):
         print(f"[SocialUser] ✅ Adapter mounted. All requests from this user will use {self.source_ip}")
     
     def _get_target_host(self):
-        """從目標伺服器列表中隨機選擇一個"""
+        """從目標伺服器列表中隨機選擇一個，返回不含 http:// 前綴的主機地址"""
         if self.target_servers:
-            return f"http://{random.choice(self.target_servers)}"
-        return self.host  # 如果沒有配置目標伺服器，使用預設 host
+            return random.choice(self.target_servers)
+        # 如果沒有配置目標伺服器，使用預設 host（移除可能存在的 http:// 前綴）
+        host = self.host
+        if host.startswith('http://'):
+            host = host[7:]
+        elif host.startswith('https://'):
+            host = host[8:]
+        return host
     
     @task(6)  # 權重：社群
     def feed_scroll(self):
         # 圖片/短片混合
         target_host = self._get_target_host()
-        self.client.get(f"{target_host}/feed?since={random.randint(1, 1_000_000_000)}", name="SOCIAL:feed")
+        url = f"http://{target_host}/feed?since={random.randint(1, 1_000_000_000)}"
+        logger.debug(f"[SocialUser] Requesting: {url}")
+        self.client.get(url, name="SOCIAL:feed")
         # 小上傳（評論/按讚）
         if random.random()<0.3:
-            self.client.post(f"{target_host}/react", json={"pid":random.randint(1, 1_000_000)}, name="SOCIAL:react")
+            url = f"http://{target_host}/react"
+            logger.debug(f"[SocialUser] Posting to: {url}")
+            self.client.post(url, json={"pid":random.randint(1, 1_000_000)}, name="SOCIAL:react")
     
     @task(4)  # 其他：瀏覽/搜尋
     def browse(self):
         target_host = self._get_target_host()
-        self.client.get(f"{target_host}/", name="WEB:index")
+        url = f"http://{target_host}/"
+        logger.debug(f"[SocialUser] Browsing: {url}")
+        self.client.get(url, name="WEB:index")
 
 
 class VideoUser(HttpUser):
@@ -94,10 +110,40 @@ class VideoUser(HttpUser):
         print(f"[VideoUser] ✅ Adapter mounted. All requests from this user will use {self.source_ip}")
     
     def _get_target_host(self):
-        """從目標伺服器列表中隨機選擇一個"""
+        """從目標伺服器列表中隨機選擇一個，返回不含 http:// 前綴的主機地址"""
         if self.target_servers:
-            return f"http://{random.choice(self.target_servers)}"
-        return self.host  # 如果沒有配置目標伺服器，使用預設 host
+            return random.choice(self.target_servers)
+        # 如果沒有配置目標伺服器，使用預設 host（移除可能存在的 http:// 前綴）
+        host = self.host
+        if host.startswith('http://'):
+            host = host[7:]
+        elif host.startswith('https://'):
+            host = host[8:]
+        return host
+    
+    def _parse_playlist(self, playlist_content: str) -> list:
+        """
+        Parse M3U8 playlist and return a list of segment filenames.
+
+        Args:
+            playlist_content: playlist text content
+
+        Returns:
+            list of segment filenames (basename only)
+        """
+        segments = []
+        for line in playlist_content.split('\n'):
+            line = line.strip()
+            # 跳過註解和空行
+            if line and not line.startswith('#'):
+                # 處理相對路徑（例如：../../seg-734.ts）
+                if line.startswith('../'):
+                    # 移除 ../ 前綴，只保留檔名
+                    filename = line.split('/')[-1]
+                    segments.append(filename)
+                else:
+                    segments.append(line)
+        return segments
         
     # 不設 wait_time，讓 session 內部的 sleep 自然控制節奏
     # 或用很長的間隔，例如：wait_time = constant(300)  # 每次 session 結束後等 5 分鐘
@@ -107,37 +153,85 @@ class VideoUser(HttpUser):
         target_host = self._get_target_host()
         
         # 1. 抓 playlist（模擬播放器初始化）
-        video_id = random.randint(1, 10000)
-        self.client.get(f"{target_host}/video/720p/video-{video_id}/playlist.m3u8", name="VIDEO:playlist")
+        # DN 伺服器只有 video-1 到 video-100（共 101 個）
+        video_id = random.randint(1, 100)
+        playlist_url = f"http://{target_host}/video/720p/video-{video_id}/playlist.m3u8"
+        
+        logger.info(f"[VideoUser] 🎬 Starting video session - Playlist URL: {playlist_url}")
+        
+        try:
+            with self.client.get(playlist_url, name="VIDEO:playlist", catch_response=True) as resp:
+                if resp.status_code != 200:
+                    logger.error(f"[VideoUser] ❌ Playlist request failed: {playlist_url} - "
+                               f"Status: {resp.status_code}, Response: {resp.text[:200]}")
+                    resp.failure(f"Playlist failed with status {resp.status_code}")
+                    return  # 如果 playlist 失敗，直接結束 session
+                
+                # 解析 playlist 獲取實際的 segment 列表
+                segments = self._parse_playlist(resp.text)
+                logger.info(f"[VideoUser] 📝 Parsed {len(segments)} segments from playlist")
+                
+                if not segments:
+                    logger.warning(f"[VideoUser] ⚠️ No segments found in playlist: {playlist_url}")
+                    resp.failure("No segments found in playlist")
+                    return
+        
+        except Exception as e:
+            logger.exception(f"[VideoUser] ❌ Exception while fetching playlist {playlist_url}: {e}")
+            return
         
         # 2. 決定這次 session 要看幾段（模擬短/中/長影片或中途離開）
-        # 假設每段 3 秒，60 段 = 3 分鐘，300 段 = 15 分鐘
-        watch_segments = random.randint(10, 100)  # 可調整範圍
+        # 從實際 playlist 中隨機選擇要播放的 segment 數量
+        watch_segments = min(random.randint(10, 100), len(segments))
+        logger.info(f"[VideoUser] 📺 Will watch {watch_segments} segments out of {len(segments)}")
         
-        # 3. 從某個起始 segment 開始連續抓取
-        start_seg = random.randint(1, 1000)
-        seg = start_seg
+        # 3. 從 playlist 中隨機選擇起始位置
+        if len(segments) > watch_segments:
+            start_idx = random.randint(0, len(segments) - watch_segments)
+        else:
+            start_idx = 0
         
+        # 4. 連續抓取 segments
         for i in range(watch_segments):
-            # 抓取當前 segment
-            with self.client.get(
-                f"{target_host}/video/720p/seg-{seg}.ts", 
-                name="VIDEO:hls_seg",
-                catch_response=True
-            ) as resp:
-                if resp.status_code != 200:
-                    resp.failure(f"Segment {seg} failed with status {resp.status_code}")
-                    # 可選：遇到錯誤就中斷 session（模擬播放器停止）
-                    if resp.status_code >= 500:
-                        break
+            seg_idx = (start_idx + i) % len(segments)
+            seg_filename = segments[seg_idx]
             
-            # 4. 模擬 segment 播放時間 + 網路 jitter（2~4 秒）
-            time.sleep(random.uniform(2.0, 4.0))
-            seg += 1
+            # 構建完整的 segment URL（根據 playlist 中的相對路徑）
+            seg_url = f"http://{target_host}/video/720p/{seg_filename}"
+            
+            logger.debug(f"[VideoUser] 📦 Fetching segment [{i+1}/{watch_segments}]: {seg_url}")
+            
+            try:
+                with self.client.get(seg_url, name="VIDEO:hls_seg", catch_response=True, timeout=30) as resp:
+                    if resp.status_code != 200:
+                        logger.error(f"[VideoUser] ❌ Segment request failed: {seg_url} - "
+                                   f"Status: {resp.status_code}")
+                        resp.failure(f"Segment {seg_filename} failed with status {resp.status_code}")
+                        
+                        # 遇到 5xx 錯誤就中斷 session（模擬播放器停止）
+                        if resp.status_code >= 500:
+                            logger.warning(f"[VideoUser] 🛑 Stopping session due to server error")
+                            break
+                    else:
+                        logger.debug(f"[VideoUser] ✅ Segment {seg_filename} downloaded successfully "
+                                   f"({len(resp.content)} bytes)")
+            
+            except Exception as e:
+                logger.exception(f"[VideoUser] ❌ Exception while fetching segment {seg_url}: {e}")
+                # 可選：遇到異常也中斷 session
+                break
+            
+            # 5. 模擬 segment 播放時間 + 網路 jitter（2~4 秒）
+            sleep_time = random.uniform(2.0, 4.0)
+            logger.debug(f"[VideoUser] ⏸️ Sleeping {sleep_time:.2f}s before next segment")
+            time.sleep(sleep_time)
             
             # 可選：模擬使用者中途跳出（5% 機率提前結束）
             if random.random() < 0.05:
+                logger.info(f"[VideoUser] 👋 User left early after {i+1} segments")
                 break
+        
+        logger.info(f"[VideoUser] ✅ Video session completed")
 
 
 class DnsLoad(User):
