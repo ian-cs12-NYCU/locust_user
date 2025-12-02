@@ -1,4 +1,4 @@
-from locust import HttpUser, User, task, constant_throughput
+from locust import HttpUser, User, task, constant_throughput, between
 from requests_toolbelt.adapters.source import SourceAddressAdapter
 import random, os, time, json, logging
 import dns.message
@@ -41,7 +41,7 @@ def _get_target_count_for_user(user_class_name: str) -> int:
 
 class SocialUser(HttpUser):
     """社群互動用戶：使用 requests.Session 綁定來源 IP"""
-    wait_time = constant_throughput(1)  # 每秒 1 次 task（適合短時間 task）
+    wait_time = between(30, 100)  # 在 30 到 100 秒之間隨機等待
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
