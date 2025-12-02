@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 from collections import Counter
 import threading
+from unittest.mock import patch, MagicMock
 
 # 添加專案根目錄到 Python 路徑
 project_root = Path(__file__).parent.parent
@@ -19,13 +20,51 @@ sys.path.insert(0, str(project_root))
 from utils.target_server import TargetServerManager, get_target_servers, get_random_target_server
 
 
+# 測試用的固定配置 - 不依賴外部文件
+TEST_SUBNETS = [
+    {
+        "subnet": "10.201.0.0/28",
+        "description": "Social 專用子網段 1",
+        "weight": 3,
+        "user_types": ["SocialUser"]
+    },
+    {
+        "subnet": "10.201.0.16/28",
+        "description": "Social 專用子網段 2",
+        "weight": 3,
+        "user_types": ["SocialUser"]
+    },
+    {
+        "subnet": "10.201.0.128/28",
+        "description": "Video 專用子網段",
+        "weight": 2,
+        "user_types": ["VideoUser"]
+    },
+    {
+        "subnet": "10.201.0.144/28",
+        "description": "通用子網段（所有類型）",
+        "weight": 1,
+        "user_types": ["SocialUser", "VideoUser", "DnsLoad"]
+    }
+]
+
+
 class TestTargetServerManager(unittest.TestCase):
     """TargetServerManager 單元測試類別"""
     
-    @classmethod
-    def setUpClass(cls):
-        """測試類別初始化（只執行一次）"""
-        cls.manager = TargetServerManager()
+    def setUp(self):
+        """每個測試前重置單例並使用測試配置"""
+        # 重置單例實例
+        TargetServerManager._instance = None
+        
+        # Mock _load_subnets 方法返回測試配置
+        with patch.object(TargetServerManager, '_load_subnets', return_value=TEST_SUBNETS):
+            self.manager = TargetServerManager()
+    
+    def tearDown(self):
+        """測試後清理"""
+        # 重置單例，避免影響其他測試
+        TargetServerManager._instance = None
     
     def test_01_initialization(self):
         """測試管理器初始化"""
@@ -50,7 +89,7 @@ class TestTargetServerManager(unittest.TestCase):
     
     def test_04_get_target_servers_social_user(self):
         """測試 SocialUser 獲取目標伺服器"""
-        servers = get_target_servers("SocialUser", 2)
+        servers = self.manager.get_target_servers("SocialUser", 2)
         self.assertEqual(len(servers), 2, "應該返回 2 個伺服器")
         
         # 驗證 IP 是否來自 Social 子網段
@@ -66,7 +105,7 @@ class TestTargetServerManager(unittest.TestCase):
     
     def test_05_get_target_servers_video_user(self):
         """測試 VideoUser 獲取目標伺服器"""
-        servers = get_target_servers("VideoUser", 1)
+        servers = self.manager.get_target_servers("VideoUser", 1)
         self.assertEqual(len(servers), 1, "應該返回 1 個伺服器")
         
         # 驗證 IP 是否來自 Video 子網段
@@ -82,7 +121,7 @@ class TestTargetServerManager(unittest.TestCase):
     
     def test_06_get_target_servers_dns_load(self):
         """測試 DnsLoad 獲取目標伺服器"""
-        servers = get_target_servers("DnsLoad", 3)
+        servers = self.manager.get_target_servers("DnsLoad", 3)
         self.assertEqual(len(servers), 3, "應該返回 3 個伺服器")
         
         # DnsLoad 只能使用通用子網段
@@ -95,22 +134,22 @@ class TestTargetServerManager(unittest.TestCase):
     
     def test_07_get_target_servers_unknown_user(self):
         """測試未配置的 User 類型"""
-        servers = get_target_servers("UnknownUser", 5)
+        servers = self.manager.get_target_servers("UnknownUser", 5)
         self.assertEqual(len(servers), 0, "未配置的 User 類型應該返回空列表")
     
     def test_08_get_target_servers_zero_count(self):
         """測試請求 0 個伺服器"""
-        servers = get_target_servers("SocialUser", 0)
+        servers = self.manager.get_target_servers("SocialUser", 0)
         self.assertEqual(len(servers), 0, "請求 0 個應該返回空列表")
     
     def test_09_get_target_servers_negative_count(self):
         """測試請求負數伺服器"""
-        servers = get_target_servers("SocialUser", -1)
+        servers = self.manager.get_target_servers("SocialUser", -1)
         self.assertEqual(len(servers), 0, "請求負數應該返回空列表")
     
     def test_10_get_random_target_server(self):
         """測試隨機獲取單一伺服器"""
-        server = get_random_target_server("SocialUser")
+        server = self.manager.get_random_target_server("SocialUser")
         self.assertIsInstance(server, str)
         self.assertTrue(len(server) > 0, "應該返回有效的 IP 地址")
         self.assertTrue(server.startswith("10.201.0."))
@@ -119,7 +158,7 @@ class TestTargetServerManager(unittest.TestCase):
         """測試隨機選擇的分布性"""
         selections = []
         for _ in range(100):
-            server = get_random_target_server("SocialUser")
+            server = self.manager.get_random_target_server("SocialUser")
             if server:
                 selections.append(server)
         
@@ -135,7 +174,7 @@ class TestTargetServerManager(unittest.TestCase):
         def worker(worker_id):
             try:
                 for _ in range(50):
-                    servers = get_target_servers(f"SocialUser", 2)
+                    servers = self.manager.get_target_servers("SocialUser", 2)
                     results.append((worker_id, servers))
             except Exception as e:
                 errors.append((worker_id, str(e)))
@@ -160,7 +199,7 @@ class TestTargetServerManager(unittest.TestCase):
         num_selections = 1000
         
         for _ in range(num_selections):
-            server = get_random_target_server("SocialUser")
+            server = self.manager.get_random_target_server("SocialUser")
             if server:
                 # 判斷來自哪個子網段
                 last_octet = int(server.split('.')[-1])
@@ -183,7 +222,7 @@ class TestTargetServerManager(unittest.TestCase):
     def test_14_user_type_isolation(self):
         """測試 User 類型隔離"""
         # SocialUser 應該只獲得 Social 相關的 IP
-        social_servers = get_target_servers("SocialUser", 10)
+        social_servers = self.manager.get_target_servers("SocialUser", 10)
         for ip in social_servers:
             last_octet = int(ip.split('.')[-1])
             # Social 可以用 0.0/28, 0.16/28, 0.144/28
@@ -195,7 +234,7 @@ class TestTargetServerManager(unittest.TestCase):
             )
         
         # VideoUser 應該只獲得 Video 相關的 IP
-        video_servers = get_target_servers("VideoUser", 10)
+        video_servers = self.manager.get_target_servers("VideoUser", 10)
         for ip in video_servers:
             last_octet = int(ip.split('.')[-1])
             # Video 可以用 0.128/28, 0.144/28
@@ -207,7 +246,7 @@ class TestTargetServerManager(unittest.TestCase):
     
     def test_15_large_count_request(self):
         """測試請求大量伺服器"""
-        servers = get_target_servers("SocialUser", 1000)
+        servers = self.manager.get_target_servers("SocialUser", 1000)
         # 應該返回結果（可能有重複）
         self.assertGreater(len(servers), 0)
         # 數量應該符合請求
@@ -215,24 +254,39 @@ class TestTargetServerManager(unittest.TestCase):
     
     def test_16_singleton_pattern(self):
         """測試單例模式"""
-        manager1 = TargetServerManager()
-        manager2 = TargetServerManager()
-        self.assertIs(manager1, manager2, "應該返回同一個實例")
+        # 注意：由於我們在 setUp 中重置單例，這裡測試的是正常運行時的單例行為
+        with patch.object(TargetServerManager, '_load_subnets', return_value=TEST_SUBNETS):
+            manager1 = TargetServerManager()
+            manager2 = TargetServerManager()
+            self.assertIs(manager1, manager2, "應該返回同一個實例")
 
 
 class TestTargetServerIntegration(unittest.TestCase):
     """整合測試"""
     
+    def setUp(self):
+        """每個測試前重置單例並使用測試配置"""
+        # 重置單例實例
+        TargetServerManager._instance = None
+        
+        # Mock _load_subnets 方法返回測試配置
+        with patch.object(TargetServerManager, '_load_subnets', return_value=TEST_SUBNETS):
+            self.manager = TargetServerManager()
+    
+    def tearDown(self):
+        """測試後清理"""
+        # 重置單例，避免影響其他測試
+        TargetServerManager._instance = None
+    
     def test_01_complete_workflow(self):
         """測試完整工作流程"""
         # 1. 初始化管理器
-        manager = TargetServerManager()
-        self.assertIsNotNone(manager)
+        self.assertIsNotNone(self.manager)
         
         # 2. 為不同 User 類型獲取伺服器
-        social_servers = get_target_servers("SocialUser", 2)
-        video_servers = get_target_servers("VideoUser", 1)
-        dns_servers = get_target_servers("DnsLoad", 3)
+        social_servers = self.manager.get_target_servers("SocialUser", 2)
+        video_servers = self.manager.get_target_servers("VideoUser", 1)
+        dns_servers = self.manager.get_target_servers("DnsLoad", 3)
         
         # 3. 驗證結果
         self.assertEqual(len(social_servers), 2)

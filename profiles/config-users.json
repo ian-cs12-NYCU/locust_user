@@ -4,12 +4,12 @@
     "user_class_name": "SocialUser", 
     "weight": 1,
     "host": "http://10.201.0.123",
-    "target_server_count": 1000
+    "target_server_count": 30
   },
   { 
     "user_class_name": "VideoUser",  
     "weight": 1,
-    "target_server_count": 50
+    "target_server_count": 1
   },
   {
     "user_class_name": "DnsLoad",
