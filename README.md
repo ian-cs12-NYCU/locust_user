@@ -148,3 +148,8 @@ config-users = ./profiles/mqtt_burst.json
 locust --class-picker
 ```
 在 UI 中直接選擇 User class 與人數/權重
+
+### script
+
+* quick_test.sh : 快速測試目標伺服器連通性
+* setup_policy_routing.sh : 設定來源 IP 的 Policy Routing，當使用的 free-ran-ue 有支援 policy routing 時無需執行此腳本

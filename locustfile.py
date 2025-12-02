@@ -221,8 +221,8 @@ class VideoUser(HttpUser):
                 # 可選：遇到異常也中斷 session
                 break
             
-            # 5. 模擬 segment 播放時間 + 網路 jitter（2~4 秒）
-            sleep_time = random.uniform(2.0, 4.0)
+            # 5. 模擬 segment 播放時間 + 網路 jitter（2.3~5.3 秒）
+            sleep_time = random.uniform(2.3, 5.3)
             logger.debug(f"[VideoUser] ⏸️ Sleeping {sleep_time:.2f}s before next segment")
             time.sleep(sleep_time)
             
