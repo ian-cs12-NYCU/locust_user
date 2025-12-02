@@ -12,6 +12,14 @@ from utils.target_server import get_target_servers  # 導入目標伺服器管�
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# ==========================================
+# LRD 參數設定 (Long Range Dependence)
+# ==========================================
+# Alpha 越接近 1.0，長依賴(LRD)越強，突發越明顯
+# 建議範圍 1.2 (強) ~ 1.6 (中)
+PARETO_ALPHA_SESSION = 1.4  # 用於決定看多久 (ON Period)
+PARETO_ALPHA_WAIT = 1.4     # 用於決定休息多久 (OFF Period)
+
 def _load_user_config():
     """載入 config-users.json 配置檔案"""
     base_dir = Path(__file__).parent
@@ -88,7 +96,7 @@ class SocialUser(HttpUser):
 
 
 class VideoUser(HttpUser):
-    """影音串流用戶：長時間連續 session"""
+    """影音串流用戶：模擬 LRD 特性的長時間連續 session"""
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -144,9 +152,27 @@ class VideoUser(HttpUser):
                 else:
                     segments.append(line)
         return segments
-        
-    # 不設 wait_time，讓 session 內部的 sleep 自然控制節奏
-    # 或用很長的間隔，例如：wait_time = constant(300)  # 每次 session 結束後等 5 分鐘
+    
+    # =================================================================
+    # [LRD 修改點 1] OFF Period (Inter-session time) - Pareto 分布
+    # =================================================================
+    def pareto_wait_time(self):
+        """
+        模擬看完一部影片後的休息時間。
+        使用 Pareto 分佈：多數時間很短（連續看），偶爾非常長（離開）。
+        """
+        # 基礎休息時間 (Scale)
+        scale = 5.0 
+        # 生成 Pareto 隨機數
+        wait = random.paretovariate(PARETO_ALPHA_WAIT) * scale
+        # 為了避免線程睡死 (例如睡 10 小時)，設定一個合理的上限 (例如 5 分鐘)
+        max_wait = 300.0
+        actual_wait = min(wait, max_wait)
+        logger.debug(f"[VideoUser] ⏰ Pareto Wait Time: {actual_wait:.2f}s (raw: {wait:.2f}s)")
+        return actual_wait
+
+    # 將這個方法指派給 Locust 的 wait_time
+    wait_time = pareto_wait_time
     
     @task
     def video_watch_session(self):
@@ -180,10 +206,19 @@ class VideoUser(HttpUser):
             logger.exception(f"[VideoUser] ❌ Exception while fetching playlist {playlist_url}: {e}")
             return
         
-        # 2. 決定這次 session 要看幾段（模擬短/中/長影片或中途離開）
-        # 從實際 playlist 中隨機選擇要播放的 segment 數量
-        watch_segments = min(random.randint(10, 100), len(segments))
-        logger.info(f"[VideoUser] 📺 Will watch {watch_segments} segments out of {len(segments)}")
+        # =================================================================
+        # [LRD 修改點 2] ON Period (Session Length) - Pareto 分布
+        # =================================================================
+        # 使用 Pareto 分佈決定要看幾個片段
+        # Scale = 10，代表最少傾向於看 10 段左右，但有機會看非常多
+        pareto_val = random.paretovariate(PARETO_ALPHA_SESSION)
+        num_segments_to_watch = int(pareto_val * 10)
+        
+        # 限制範圍：至少看 1 段，最多把整部片看完 (或設定上限如 200)
+        watch_segments = min(max(1, num_segments_to_watch), len(segments), 200)
+        
+        logger.info(f"[VideoUser] 📺 Pareto Decision: Will watch {watch_segments} segments "
+                   f"(Pareto value: {pareto_val:.2f}, Total available: {len(segments)})")
         
         # 3. 從 playlist 中隨機選擇起始位置
         if len(segments) > watch_segments:
@@ -221,14 +256,20 @@ class VideoUser(HttpUser):
                 # 可選：遇到異常也中斷 session
                 break
             
-            # 5. 模擬 segment 播放時間 + 網路 jitter（2.3~5.3 秒）
+            # =================================================================
+            # [LRD 修改點 3] Bitrate 控制 (Micro-level)
+            # =================================================================
+            # 目標：平均 Bitrate 3~7 Mbps
+            # 平均檔案大小 16Mb (2MB) / 平均間隔 3.2s = 5 Mbps
+            # 設定範圍：2.3s ~ 5.3s
             sleep_time = random.uniform(2.3, 5.3)
             logger.debug(f"[VideoUser] ⏸️ Sleeping {sleep_time:.2f}s before next segment")
             time.sleep(sleep_time)
             
-            # 可選：模擬使用者中途跳出（5% 機率提前結束）
-            if random.random() < 0.05:
-                logger.info(f"[VideoUser] 👋 User left early after {i+1} segments")
+            # 可選：模擬極小機率的隨機中斷（模擬斷網，1% 機率）
+            # 移除舊的 5% 跳出率，因為已經用 Pareto 決定了 session 長度
+            if random.random() < 0.01:
+                logger.info(f"[VideoUser] 🔌 Network interruption - stopping after {i+1} segments")
                 break
         
         logger.info(f"[VideoUser] ✅ Video session completed")
