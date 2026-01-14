@@ -3,12 +3,14 @@
   { 
     "user_class_name": "SocialUser", 
     "weight": 1,
-    "host": "http://10.201.0.123",
+    "host": "10.201.0.123",
+    "protocol": "https",
     "target_server_count": 30
   },
   { 
     "user_class_name": "VideoUser",  
     "weight": 1,
+    "protocol": "https",
     "target_server_count": 1
   },
   {

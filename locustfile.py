@@ -1,12 +1,18 @@
-from locust import HttpUser, User, task, constant_throughput, between
+from locust import HttpUser, User, task, between
 from requests_toolbelt.adapters.source import SourceAddressAdapter
 import random, os, time, json, logging
 import dns.message
 import dns.rdatatype
 import dns.query
+import urllib3
 from pathlib import Path
 from utils.ip_manager import get_source_ip  # 從 utils 模組導入
 from utils.target_server import get_target_servers  # 導入目標伺服器管理器
+
+# ==========================================
+# SSL 設定：忽略自簽憑證的安全性警告
+# ==========================================
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # 設定日誌格式，方便除錯
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -39,6 +45,17 @@ def _get_target_count_for_user(user_class_name: str) -> int:
             return user_config.get('target_server_count', 0)
     return 0
 
+def _get_protocol_for_user(user_class_name: str) -> str:
+    """從配置中獲取特定 User 類型的 protocol。預設為 https"""
+    config = _load_user_config()
+    for user_config in config:
+        if user_config.get('user_class_name') == user_class_name:
+            protocol = user_config.get('protocol', 'https')
+            # 正規化為小寫
+            return protocol.lower() if protocol else 'https'
+    # 預設使用 https
+    return 'https'
+
 class SocialUser(HttpUser):
     """社群互動用戶：使用 requests.Session 綁定來源 IP"""
     wait_time = between(30, 100)  # 在 30 到 100 秒之間隨機等待
@@ -48,11 +65,14 @@ class SocialUser(HttpUser):
         # 每個 User 實例在創建時，傳入自己的類名來獲取 IP
         self.source_ip = get_source_ip(self.__class__.__name__)
         
+        # 獲取协议配置
+        self.protocol = _get_protocol_for_user(self.__class__.__name__)
+        
         # 獲取目標伺服器列表
         target_count = _get_target_count_for_user(self.__class__.__name__)
         self.target_servers = get_target_servers(self.__class__.__name__, target_count)
         print(f"[SocialUser] Initialized with source IP: {self.source_ip}, "
-              f"target servers: {self.target_servers}")
+              f"protocol: {self.protocol}, target servers: {self.target_servers}")
     
     def on_start(self):
         """在 on_start 中掛載 SourceAddressAdapter"""
@@ -78,21 +98,21 @@ class SocialUser(HttpUser):
     def feed_scroll(self):
         # 圖片/短片混合
         target_host = self._get_target_host()
-        url = f"http://{target_host}/feed?since={random.randint(1, 1_000_000_000)}"
+        url = f"{self.protocol}://{target_host}/feed?since={random.randint(1, 1_000_000_000)}"
         logger.debug(f"[SocialUser] Requesting: {url}")
-        self.client.get(url, name="SOCIAL:feed")
+        self.client.get(url, name="SOCIAL:feed", verify=False)
         # 小上傳（評論/按讚）
         if random.random()<0.3:
-            url = f"http://{target_host}/react"
+            url = f"{self.protocol}://{target_host}/react"
             logger.debug(f"[SocialUser] Posting to: {url}")
-            self.client.post(url, json={"pid":random.randint(1, 1_000_000)}, name="SOCIAL:react")
+            self.client.post(url, json={"pid":random.randint(1, 1_000_000)}, name="SOCIAL:react", verify=False)
     
     @task(4)  # 其他：瀏覽/搜尋
     def browse(self):
         target_host = self._get_target_host()
-        url = f"http://{target_host}/"
+        url = f"{self.protocol}://{target_host}/"
         logger.debug(f"[SocialUser] Browsing: {url}")
-        self.client.get(url, name="WEB:index")
+        self.client.get(url, name="WEB:index", verify=False)
 
 
 class VideoUser(HttpUser):
@@ -103,11 +123,14 @@ class VideoUser(HttpUser):
         # 傳入自己的類名來獲取 IP
         self.source_ip = get_source_ip(self.__class__.__name__)
         
+        # 獲取协议配置
+        self.protocol = _get_protocol_for_user(self.__class__.__name__)
+        
         # 獲取目標伺服器列表
         target_count = _get_target_count_for_user(self.__class__.__name__)
         self.target_servers = get_target_servers(self.__class__.__name__, target_count)
         print(f"[VideoUser] Initialized with source IP: {self.source_ip}, "
-              f"target servers: {self.target_servers}")
+              f"protocol: {self.protocol}, target servers: {self.target_servers}")
 
     def on_start(self):
         """在 on_start 中掛載 SourceAddressAdapter"""
@@ -181,12 +204,12 @@ class VideoUser(HttpUser):
         # 1. 抓 playlist（模擬播放器初始化）
         # DN 伺服器只有 video-1 到 video-100（共 101 個）
         video_id = random.randint(1, 100)
-        playlist_url = f"http://{target_host}/video/720p/video-{video_id}/playlist.m3u8"
+        playlist_url = f"{self.protocol}://{target_host}/video/720p/video-{video_id}/playlist.m3u8"
         
         logger.info(f"[VideoUser] 🎬 Starting video session - Playlist URL: {playlist_url}")
         
         try:
-            with self.client.get(playlist_url, name="VIDEO:playlist", catch_response=True) as resp:
+            with self.client.get(playlist_url, name="VIDEO:playlist", catch_response=True, verify=False) as resp:
                 if resp.status_code != 200:
                     logger.error(f"[VideoUser] ❌ Playlist request failed: {playlist_url} - "
                                f"Status: {resp.status_code}, Response: {resp.text[:200]}")
@@ -232,12 +255,12 @@ class VideoUser(HttpUser):
             seg_filename = segments[seg_idx]
             
             # 構建完整的 segment URL（根據 playlist 中的相對路徑）
-            seg_url = f"http://{target_host}/video/720p/{seg_filename}"
+            seg_url = f"{self.protocol}://{target_host}/video/720p/{seg_filename}"
             
             logger.debug(f"[VideoUser] 📦 Fetching segment [{i+1}/{watch_segments}]: {seg_url}")
             
             try:
-                with self.client.get(seg_url, name="VIDEO:hls_seg", catch_response=True, timeout=30) as resp:
+                with self.client.get(seg_url, name="VIDEO:hls_seg", catch_response=True, timeout=30, verify=False) as resp:
                     if resp.status_code != 200:
                         logger.error(f"[VideoUser] ❌ Segment request failed: {seg_url} - "
                                    f"Status: {resp.status_code}")
@@ -322,7 +345,7 @@ class DnsLoad(User):
         return self.dns_server
     
     # 等待時間
-    wait_time = constant_throughput(1)  # 每秒 1 個查詢
+    wait_time = between(1, 3)  # 每秒 1 個查詢
     
     # 隨機域名列表（可以根據需求調整）
     domains = [
