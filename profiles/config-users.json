@@ -18,6 +18,7 @@
     "weight": 1,
     "dns_server": "10.201.0.180",
     "dns_port": 53,
-    "target_server_count": 1
+    "target_server_count": 1,
+    "comment": "DnsLoad 使用 UDP 協議，不需要 protocol 設定"
   }
 ]

@@ -23,12 +23,6 @@ show_status() {
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
     
-    if [ -f "$LOCUST_CONF" ]; then
-        echo "📋 locust.conf:"
-        grep "^protocol" "$LOCUST_CONF" | head -1
-        echo ""
-    fi
-    
     if [ -f "$CONFIG_FILE" ]; then
         echo "📋 config-users.json:"
         grep -o '"protocol": "[^"]*"' "$CONFIG_FILE" | sed 's/"protocol": /  /' | sort | uniq -c
@@ -52,11 +46,6 @@ switch_protocol() {
         echo "✅ 已备份配置文件: ${CONFIG_FILE}.backup"
     fi
     
-    if [ -f "$LOCUST_CONF" ]; then
-        cp "$LOCUST_CONF" "${LOCUST_CONF}.backup"
-        echo "✅ 已备份配置文件: ${LOCUST_CONF}.backup"
-    fi
-    
     echo ""
     
     # 更新 config-users.json
@@ -64,12 +53,6 @@ switch_protocol() {
         sed -i 's/"protocol": "http"/"protocol": "'"$protocol"'"/g' "$CONFIG_FILE"
         sed -i 's/"protocol": "https"/"protocol": "'"$protocol"'"/g' "$CONFIG_FILE"
         echo "✅ 已更新: $CONFIG_FILE"
-    fi
-    
-    # 更新 locust.conf
-    if [ -f "$LOCUST_CONF" ]; then
-        sed -i 's/^protocol = .*/protocol = '"$protocol"'/g' "$LOCUST_CONF"
-        echo "✅ 已更新: $LOCUST_CONF"
     fi
     
     echo ""

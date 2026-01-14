@@ -5,6 +5,8 @@ import dns.message
 import dns.rdatatype
 import dns.query
 import urllib3
+import ssl
+from urllib3.poolmanager import PoolManager
 from pathlib import Path
 from utils.ip_manager import get_source_ip  # 從 utils 模組導入
 from utils.target_server import get_target_servers  # 導入目標伺服器管理器
@@ -17,6 +19,53 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 # 設定日誌格式，方便除錯
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# ==========================================
+# IoT SSL Adapter: 縮小 TLS Client Hello 封包
+# ==========================================
+class IoTSSLAdapter(SourceAddressAdapter):
+    """
+    現代輕量 TLS Adapter for 5G/eBPF/LLM 實驗
+    目標：Client Hello < 500 bytes
+    策略：TLS 1.3 + 極少 Cipher Suites + 無 Session Tickets
+    特色：保留 TLS 1.3 特徵 (Key Share, Supported Versions) 供 LLM 學習
+    """
+    def init_poolmanager(self, connections, maxsize, block=False, **pool_kwargs):
+        # 1. 建立最小化 Context (不使用 create_default_context，避免自動添加擴展)
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        
+        # 2. 支援 TLS 1.3 (移除 maximum_version 限制)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        # context.maximum_version = ssl.TLSVersion.TLSv1_2  <-- 允許使用 TLS 1.3
+        
+        # 3. 【關鍵瘦身】精簡 Cipher Suites (TLS 1.3 + 1.2)
+        # 這樣 Client Hello 會包含 TLS 1.3 特徵，但依然很小
+        context.set_ciphers("TLS_AES_128_GCM_SHA256:ECDHE-RSA-AES128-GCM-SHA256")
+        
+        # 4. 【關鍵瘦身】關閉所有可選的 Extensions
+        context.options |= ssl.OP_NO_TICKET  # 移除 Session Ticket Extension
+        context.options |= ssl.OP_NO_COMPRESSION  # 移除 Compression
+        
+        # 5. 【關鍵瘦身】只用一個 Elliptic Curve，減少 Supported Groups Extension
+        try:
+            # Python 3.10+ 支援設定 Curves
+            context.set_ecdh_curve('prime256v1')  # 只用 P-256
+        except AttributeError:
+            pass  # 舊版 Python 沒有這個方法
+        
+        # 6. 關閉憑證驗證
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        
+        # 7. 將自訂的 SSL Context 注入 PoolManager
+        self.poolmanager = PoolManager(
+            num_pools=connections,
+            maxsize=maxsize,
+            block=block,
+            source_address=self.source_address,  # 保留源 IP 綁定
+            ssl_context=context,  # 使用自訂的 SSL Context
+            **pool_kwargs
+        )
 
 # ==========================================
 # LRD 參數設定 (Long Range Dependence)
@@ -75,12 +124,15 @@ class SocialUser(HttpUser):
               f"protocol: {self.protocol}, target servers: {self.target_servers}")
     
     def on_start(self):
-        """在 on_start 中掛載 SourceAddressAdapter"""
-        print(f"[SocialUser] 🔧 Mounting SourceAddressAdapter for IP: {self.source_ip}")
-        adapter = SourceAddressAdapter((self.source_ip, 0))
+        """在 on_start 中掛載 IoTSSLAdapter"""
+        print(f"[SocialUser] 🔧 Mounting IoTSSLAdapter for IP: {self.source_ip}")
+        
+        # 使用我們自訂的 Adapter，既能綁 IP，又能縮小 TLS Hello
+        adapter = IoTSSLAdapter((self.source_ip, 0))
+        
         self.client.mount("http://", adapter)
         self.client.mount("https://", adapter)
-        print(f"[SocialUser] ✅ Adapter mounted. All requests from this user will use {self.source_ip}")
+        print(f"[SocialUser] ✅ IoT-like SSL Adapter mounted. All requests will use {self.source_ip}")
     
     def _get_target_host(self):
         """從目標伺服器列表中隨機選擇一個，返回不含 http:// 前綴的主機地址"""
@@ -133,12 +185,15 @@ class VideoUser(HttpUser):
               f"protocol: {self.protocol}, target servers: {self.target_servers}")
 
     def on_start(self):
-        """在 on_start 中掛載 SourceAddressAdapter"""
-        print(f"[VideoUser] 🔧 Mounting SourceAddressAdapter for IP: {self.source_ip}")
-        adapter = SourceAddressAdapter((self.source_ip, 0))
+        """在 on_start 中掛載 IoTSSLAdapter"""
+        print(f"[VideoUser] 🔧 Mounting IoTSSLAdapter for IP: {self.source_ip}")
+        
+        # 同樣替換成 IoTSSLAdapter
+        adapter = IoTSSLAdapter((self.source_ip, 0))
+        
         self.client.mount("http://", adapter)
         self.client.mount("https://", adapter)
-        print(f"[VideoUser] ✅ Adapter mounted. All requests from this user will use {self.source_ip}")
+        print(f"[VideoUser] ✅ IoT-like SSL Adapter mounted. All requests will use {self.source_ip}")
     
     def _get_target_host(self):
         """從目標伺服器列表中隨機選擇一個，返回不含 http:// 前綴的主機地址"""

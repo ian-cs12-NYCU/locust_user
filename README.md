@@ -16,18 +16,20 @@ locust --config ./locust.conf
 ## 配置檔案
 
 ### profiles/config-users.json
-定義 User 類型、權重和目標伺服器數量：
+定義 User 類型、權重、協議和目標伺服器數量：
 ```json
 [
   { 
     "user_class_name": "SocialUser", 
     "weight": 1,
-    "host": "http://httpbin.org",
+    "host": "10.201.0.123",
+    "protocol": "https",
     "target_server_count": 2
   },
   { 
     "user_class_name": "VideoUser",  
     "weight": 1,
+    "protocol": "https",
     "target_server_count": 1
   },
   {
@@ -35,9 +37,30 @@ locust --config ./locust.conf
     "weight": 1,
     "dns_server": "10.201.0.180",
     "dns_port": 53,
-    "target_server_count": 3
+    "target_server_count": 3,
+    "comment": "DnsLoad 使用 UDP 協議，不需要 protocol 設定"
   }
 ]
+```
+
+**欄位說明**：
+- `protocol`: 使用的協議（`http` 或 `https`），預設為 `https`
+  - 注意：`DnsLoad` 使用 UDP 協議，不受此設定影響
+- `host`: 目標主機地址（不含協議前綴）
+- `weight`: User 類型的權重
+- `target_server_count`: 目標伺服器數量
+- `dns_server`: DNS 伺服器地址（僅適用於 DnsLoad）
+- `dns_port`: DNS 伺服器端口（僅適用於 DnsLoad，預設 53）
+
+**協議切換**：
+```bash
+# 方法 1: 使用快速切換腳本
+./switch_protocol.sh https    # 切換到 HTTPS
+./switch_protocol.sh http     # 切換到 HTTP
+./switch_protocol.sh status   # 查看當前配置
+
+# 方法 2: 手動編輯 config-users.json
+# 修改 "protocol": "https" 或 "http"
 ```
 
 ### profiles/target.json
